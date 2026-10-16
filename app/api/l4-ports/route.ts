@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * POST /api/l4-ports — trigger port apply (write override + trigger file).
+ * POST /api/l4-ports — apply network-mode-specific L4 listener changes.
  */
 export async function POST(request: NextRequest) {
   try {

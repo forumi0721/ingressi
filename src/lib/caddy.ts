@@ -3548,8 +3548,8 @@ async function buildCaddyDocumentFromDatabase() {
 
   return {
     admin: {
-      listen: "0.0.0.0:2019",
-      origins: ["caddy:2019", "localhost:2019", "localhost"]
+      listen: process.env.CADDY_ADMIN_ADDRESS || "0.0.0.0:2019",
+      origins: ["caddy:2019", "host.docker.internal:2019", "localhost:2019", "localhost"]
     },
     ...(storage ? { storage } : {}),
     ...loggingApp,

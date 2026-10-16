@@ -38,7 +38,7 @@ import {
 } from "./sync-crypto";
 import { getSyncKeyPin, isUnreadableSyncKeyPin, syncKeyPinIdentity, updateSyncKeyPin } from "./instance-sync-key-pins";
 import { logAuditEvent } from "./audit";
-import { applyL4Ports, getL4PortsDiff } from "./l4-ports";
+import { applyL4Ports, getL4PortsDiff, getCaddyNetworkMode } from "./l4-ports";
 import {
   assertValidInstanceSyncToken,
   isValidInstanceSyncToken,
@@ -1739,10 +1739,10 @@ export async function applySyncPayload(received: SyncPayload): Promise<AppliedSy
     console.warn("Instance sync: could not reload the API monetization gate:", error instanceof Error ? error.name : typeof error);
   }
 
-  // If the synced L4 proxy hosts require different ports than currently applied,
-  // write the override file and trigger the sidecar to recreate the caddy container.
+  // In bridge mode a changed port set needs container recreation. In host mode,
+  // apply the synced listener configuration directly through Caddy's Admin API.
   const diff = await getL4PortsDiff();
-  if (diff.needsApply) {
+  if (diff.needsApply || getCaddyNetworkMode() === "host") {
     await applyL4Ports();
   }
 

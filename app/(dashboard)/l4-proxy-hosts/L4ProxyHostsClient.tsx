@@ -64,6 +64,7 @@ export type L4HostStatus = { tone: StatusTone; label: string };
 /** Disabled, waiting for its port to be published, or active. */
 export function l4HostStatus(host: L4ProxyHost, portsDiff: PortsDiff | null): L4HostStatus {
   if (!host.enabled) return { tone: "off", label: "Disabled" };
+  if (portsDiff?.networkMode === "host") return { tone: "ok", label: "Active" };
   const mapping = portMappingFor(host);
   if (portsDiff && mapping && portsDiff.requiredPorts.includes(mapping) && !portsDiff.currentPorts.includes(mapping)) {
     return { tone: "warn", label: "Port not published" };

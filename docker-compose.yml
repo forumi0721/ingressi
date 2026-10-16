@@ -28,6 +28,8 @@ services:
 
       # Caddy API endpoint (internal communication)
       CADDY_API_URL: ${CADDY_API_URL:-http://caddy:2019}
+      CADDY_ADMIN_ADDRESS: ${CADDY_ADMIN_ADDRESS:-0.0.0.0:2019}
+      CADDY_NETWORK_MODE: ${CADDY_NETWORK_MODE:-bridge}
 
       # Public base URL for the application
       BASE_URL: ${BASE_URL:-http://localhost:3000}
@@ -132,6 +134,8 @@ services:
     environment:
       # Primary domain for Caddy configuration
       PRIMARY_DOMAIN: ${PRIMARY_DOMAIN:-ingressi.localhost}
+      CADDY_ADMIN_ADDRESS: ${CADDY_ADMIN_ADDRESS:-0.0.0.0:2019}
+      CADDY_ADMIN_HEALTH_URL: ${CADDY_ADMIN_HEALTH_URL:-http://localhost:2019}
     volumes:
       - caddy-data:/data
       - caddy-config:/config
@@ -148,7 +152,7 @@ services:
     networks:
       - caddy-network
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "-O", "/dev/null", "http://localhost:2019/config/"]
+      test: ["CMD-SHELL", "wget --quiet --tries=1 -O /dev/null $${CADDY_ADMIN_HEALTH_URL}/config/"]
       interval: 30s
       timeout: 10s
       retries: 3

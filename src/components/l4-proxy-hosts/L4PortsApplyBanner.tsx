@@ -9,6 +9,8 @@ export type PortsDiff = {
   currentPorts: string[];
   requiredPorts: string[];
   needsApply: boolean;
+  networkMode?: "bridge" | "host";
+  portPublishingRequired?: boolean;
 };
 
 type PortsStatus = {
@@ -132,6 +134,14 @@ export function L4PortsApplyBanner({
   if (!data) return null;
   const { diff, status } = data;
   const busy = applying || status.state === "pending" || status.state === "applying";
+
+  if (diff.networkMode === "host") {
+    return (
+      <Banner tone="info" title="Host network mode.">
+        Caddy listens directly on host ports. Docker port publishing is not required.
+      </Banner>
+    );
+  }
 
   if (busy) {
     return (

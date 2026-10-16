@@ -28,6 +28,14 @@ const OVERRIDE_FILE = "docker-compose.l4-ports.yml";
 const TRIGGER_FILE = "l4-ports.trigger";
 const STATUS_FILE = "l4-ports.status";
 
+export type CaddyNetworkMode = "bridge" | "host";
+
+export function getCaddyNetworkMode(): CaddyNetworkMode {
+  const mode = process.env.CADDY_NETWORK_MODE?.trim() || "bridge";
+  if (mode === "bridge" || mode === "host") return mode;
+  throw new Error(`CADDY_NETWORK_MODE must be "bridge" or "host" (received "${mode}").`);
+}
+
 export type L4PortsStatus = {
   state: "idle" | "pending" | "applying" | "applied" | "failed";
   message?: string;
@@ -41,6 +49,8 @@ export type L4PortsDiff = {
   currentPorts: string[];
   requiredPorts: string[];
   needsApply: boolean;
+  networkMode: CaddyNetworkMode;
+  portPublishingRequired: boolean;
 };
 
 /**
@@ -122,9 +132,19 @@ function hashPorts(ports: string[]): string {
  */
 export async function getL4PortsDiff(): Promise<L4PortsDiff> {
   const requiredPorts = await getRequiredL4Ports();
+  const networkMode = getCaddyNetworkMode();
+  if (networkMode === "host") {
+    return {
+      currentPorts: [],
+      requiredPorts,
+      needsApply: false,
+      networkMode,
+      portPublishingRequired: false,
+    };
+  }
   const currentPorts = getAppliedL4Ports();
   const needsApply = hashPorts(requiredPorts) !== hashPorts(currentPorts);
-  return { currentPorts, requiredPorts, needsApply };
+  return { currentPorts, requiredPorts, needsApply, networkMode, portPublishingRequired: true };
 }
 
 /**
@@ -139,6 +159,11 @@ const L4_PORTS_LOCK = "l4-ports";
  * Returns the status after triggering.
  */
 export async function applyL4Ports(): Promise<L4PortsStatus> {
+  if (getCaddyNetworkMode() === "host") {
+    const { applyCaddyConfig } = await import("./caddy");
+    await applyCaddyConfig();
+    return { state: "applied", message: "Caddy configuration applied directly; Docker port publishing is not required.", appliedAt: new Date().toISOString() };
+  }
   return await withClusterLock(L4_PORTS_LOCK, () => writeL4PortFiles());
 }
 
@@ -189,6 +214,9 @@ ${portLines}
  * Read the current status from the status file written by the sidecar.
  */
 export function getL4PortsStatus(): L4PortsStatus {
+  if (getCaddyNetworkMode() === "host") {
+    return { state: "idle", message: "Direct listener mode does not use the port manager sidecar." };
+  }
   const statusPath = join(DATA_DIR, STATUS_FILE);
 
   if (!existsSync(statusPath)) {

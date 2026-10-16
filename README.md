@@ -25,6 +25,8 @@ docker compose up -d
 
 Sign in at `http://localhost:3000/login` with `ADMIN_USERNAME` (`admin` in `.env.example`) and `ADMIN_PASSWORD`.
 
+Linux Docker Engine deployments can optionally run Caddy on the host network. Set `CADDY_HOST_GATEWAY_IP` in `.env` and deploy the standalone `docker-compose.host.yml` Stack (in Portainer, use a Git-based Stack pointing to that file); see [L4 network modes](documentation/l4-proxy-hosts.md#ports-and-network-mode) for the Admin API firewall and upstream DNS requirements.
+
 Data persists in Docker volumes (caddy-manager-data, caddy-data, caddy-config, caddy-logs, geoip-data, clickhouse-data, acme-ca). The environment variables are listed in the [configuration reference](documentation/configuration.md); before going to production, read [Security](documentation/security.md).
 
 ## Upgrading from Caddy Proxy Manager
@@ -34,7 +36,7 @@ Caddy Proxy Manager is now Ingressi. The old header, cookie and database names k
 ## Features
 
 - **Proxy hosts:** reverse proxies with custom headers, several upstreams, load balancing (8 policies), active and passive health checks, retries, path-based routes, redirects and rewrites
-- **L4 proxy hosts:** TCP/UDP stream proxying with TLS SNI matching, proxy protocol (v1/v2), load balancing, health checks and geo blocking; a sidecar manages the Docker Compose ports
+- **L4 proxy hosts:** TCP/UDP stream proxying with TLS SNI matching, proxy protocol (v1/v2), load balancing, health checks and geo blocking; Bridge and optional Host network modes
 - **Certificates:** automatic HTTPS through ACME (Let's Encrypt, ZeroSSL), DNS-01 with 22 DNS providers, imported certificates, and an optional built-in CA for client certificates (mTLS) with role-based path rules
 - **Visibility:** traffic analytics in ClickHouse, security events and an audit log of every change
 - **Optional protections, per host** (off until an administrator turns them on): a web application firewall (Coraza with the OWASP Core Rule Set, per-host modes, rule exclusions and custom SecLang rules), access lists (address, country, continent and AS number rules, and basic auth), geo blocking and rate limiting

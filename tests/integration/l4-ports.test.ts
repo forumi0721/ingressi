@@ -83,6 +83,7 @@ function cleanTmpDir() {
 }
 
 beforeEach(async () => {
+  process.env.CADDY_NETWORK_MODE = 'bridge';
   await ctx.db.delete(schema.l4ProxyHosts);
   cleanTmpDir();
 });
@@ -272,6 +273,25 @@ describe('getL4PortsDiff', () => {
     const diff = await getL4PortsDiff();
     expect(diff.needsApply).toBe(true);
   });
+
+  it('reports direct listeners in Host Mode without consulting the override', async () => {
+    await ctx.db.insert(schema.l4ProxyHosts).values(makeL4Host({ listenAddress: ':5432' }));
+    const previousMode = process.env.CADDY_NETWORK_MODE;
+    process.env.CADDY_NETWORK_MODE = 'host';
+    try {
+      const diff = await getL4PortsDiff();
+      expect(diff).toEqual({
+        currentPorts: [],
+        requiredPorts: ['5432:5432'],
+        needsApply: false,
+        networkMode: 'host',
+        portPublishingRequired: false,
+      });
+    } finally {
+      if (previousMode === undefined) delete process.env.CADDY_NETWORK_MODE;
+      else process.env.CADDY_NETWORK_MODE = previousMode;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -331,6 +351,20 @@ describe('applyL4Ports', () => {
     const content2 = readFileSync(join(ctx.tmpDir, 'docker-compose.l4-ports.yml'), 'utf-8');
 
     expect(content1).toBe(content2);
+  });
+
+  it('applies Caddy configuration directly in Host Mode without writing port files', async () => {
+    const previousMode = process.env.CADDY_NETWORK_MODE;
+    process.env.CADDY_NETWORK_MODE = 'host';
+    try {
+      const status = await applyL4Ports();
+      expect(status.state).toBe('applied');
+      expect(existsSync(join(ctx.tmpDir, 'docker-compose.l4-ports.yml'))).toBe(false);
+      expect(existsSync(join(ctx.tmpDir, 'l4-ports.trigger'))).toBe(false);
+    } finally {
+      if (previousMode === undefined) delete process.env.CADDY_NETWORK_MODE;
+      else process.env.CADDY_NETWORK_MODE = previousMode;
+    }
   });
 });
 

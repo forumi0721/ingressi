@@ -1,0 +1,53 @@
+# Standalone Host network Stack for the main Ingressi SQLite deployment.
+# The Web and Caddy service definitions are inherited from docker-compose.yml.
+# Set CADDY_HOST_GATEWAY_IP to the host address mapped by Docker's
+# host-gateway special name (commonly 172.17.0.1).
+services:
+  web:
+    extends:
+      file: docker-compose.yml
+      service: web
+    environment:
+      CADDY_NETWORK_MODE: host
+      CADDY_API_URL: http://host.docker.internal:2019
+      CADDY_ADMIN_ADDRESS: ${CADDY_HOST_GATEWAY_IP:?Set CADDY_HOST_GATEWAY_IP to the Docker host-gateway address}:2019
+      FORWARD_AUTH_INTERNAL_URL: http://${CADDY_HOST_GATEWAY_IP:?Set CADDY_HOST_GATEWAY_IP to the Docker host-gateway address}:3000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  caddy:
+    extends:
+      file: docker-compose.yml
+      service: caddy
+    network_mode: host
+    ports: !reset []
+    networks: !reset []
+    # Do not resume a config saved from Bridge Mode: it may reopen the Admin
+    # API on 0.0.0.0. Web reapplies the database-backed config at startup.
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    environment:
+      CADDY_ADMIN_ADDRESS: ${CADDY_HOST_GATEWAY_IP:?Set CADDY_HOST_GATEWAY_IP to the Docker host-gateway address}:2019
+      CADDY_ADMIN_HEALTH_URL: http://${CADDY_HOST_GATEWAY_IP:?Set CADDY_HOST_GATEWAY_IP to the Docker host-gateway address}:2019
+
+  clickhouse:
+    extends:
+      file: docker-compose.yml
+      service: clickhouse
+
+  geoipupdate:
+    extends:
+      file: docker-compose.yml
+      service: geoipupdate
+
+volumes:
+  caddy-manager-data:
+  geoip-data:
+  caddy-logs:
+  acme-ca:
+  caddy-data:
+  caddy-config:
+  clickhouse-data:
+
+networks:
+  caddy-network:
+    driver: bridge

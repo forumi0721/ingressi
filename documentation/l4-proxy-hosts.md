@@ -10,7 +10,7 @@ An L4 host forwards TCP or UDP traffic that is not HTTP (SSH, mail, DNS over TLS
 - **Listen**: the protocol and the listen address.
 - **Upstream**: the first upstream and how many more (hover to see them all).
 - **Tags**, when any host has tags ([host tags](host-tags.md)).
-- **Status**: *Active*, *Disabled*, or *Port not published* when the host is saved but Caddy cannot receive its traffic yet (see [Ports](#ports)).
+- **Status**: *Active*, *Disabled*, or *Port not published* in Bridge Mode when the host is saved but Caddy cannot receive its traffic yet (see [Ports](#ports-and-network-mode)).
 
 Search matches names, listen addresses, upstreams, server names and tags, ignoring case. The protocol filter (TCP or UDP) and the status filter (enabled or disabled) narrow the list; each option shows how many hosts it would list with the search and the other filter. By default, the list is sorted newest first. **Profile → Interface → Default list order** can change the account's initial ordering; an explicit sort in the URL wins. The Name, Listen, Upstream and Status headings sort by that column (on a phone, use the Sort menu). It shows 25 hosts per page, and the page is part of the address, so back, reload and shared links keep it.
 
@@ -35,9 +35,13 @@ The tabs switch in place and are linkable (`#routing`, `#security` …, or a car
 
 **Duplicate** opens the editor for a new host filled from the host (`/l4-proxy-hosts/new?from=<id>`): hosts on the same port need different matchers, so change the listen address or the matcher before creating it.
 
-## Ports
+## Ports and network mode
 
-Each L4 host listens on a port of the Caddy container, and Docker publishes a container's ports only when it creates the container. When a host needs a port that is not published yet, the page names it (or counts them, with **Show ports** listing each with its hosts, when there are more than three) and offers **Publish ports now**: the L4 port manager sidecar recreates the Caddy container with the new ports, which interrupts all traffic through Caddy for a few seconds. A port no host uses any more stays published until the container is recreated; the page offers that too. Ports 80, 443 and 2019 are Caddy's own and cannot be used.
+Bridge Mode is the default. Each L4 host listens on a port of the Caddy container, and Docker publishes the needed ports when it creates the container. When a port is missing, the page offers **Publish ports now**; the L4 port manager recreates Caddy, which interrupts traffic for a few seconds. Ports 80, 443 and 2019 are reserved for Caddy.
+
+For Host Mode, replace the existing Stack definition with the standalone `docker-compose.host.yml` file and set `CADDY_HOST_GATEWAY_IP` to the host address used by Docker's `host-gateway` mapping. Keep the existing Compose project/Portainer Stack name so named volumes retain their names. With Docker Compose, run `docker compose -f docker-compose.host.yml up -d`; in Portainer, use a Git-based Stack pointing to this file. The Caddy container uses the host network; Web and the database remain on the Compose network. The Docker socket proxy and L4 port manager are not part of this Stack. Caddy's unauthenticated Admin API binds only to the specified host gateway address on port 2019. Keep that address private and use the host firewall to allow access only from the Web container; do not expose port 2019 on public interfaces. On restart, Caddy starts from its base Caddyfile and Web reapplies the database-backed configuration after Caddy becomes healthy; traffic may be interrupted during that startup. The dashboard shows the active network mode and does not ask to publish ports.
+
+Host networking is supported on Linux Docker Engine. Docker Desktop uses a VM network and does not provide the same host binding behavior. Check that the host ports are unused. Caddy runs as a non-root user: ports below the host's `net.ipv4.ip_unprivileged_port_start` may fail to bind without host configuration. Host network containers do not use Compose service DNS. Set Proxy Host upstreams to addresses reachable from the host network; the `web` service is reached via its published port for Forward Auth. Caddy applies listener changes through its Admin API; existing connection behavior during a configuration update depends on Caddy and the affected protocol, so this mode does not promise zero downtime. The provided Host Stack targets the main SQLite stack; review custom PostgreSQL replica and HA upstreams separately before combining those files.
 
 ## Settings worth knowing
 
@@ -46,6 +50,6 @@ Each L4 host listens on a port of the Caddy container, and Docker publishes a co
 
 ## Permissions and API
 
-The list and a host's page need `l4_proxy_hosts:read`; the editor (`/l4-proxy-hosts/new` and the tabs of a host's page), deleting and publishing ports need `l4_proxy_hosts:write` ([custom roles](../ee/docs/custom-roles.md)).
+The list and a host's page need `l4_proxy_hosts:read`; the editor (`/l4-proxy-hosts/new` and the tabs of a host's page), deleting, and applying Bridge Mode port changes need `l4_proxy_hosts:write` ([custom roles](../ee/docs/custom-roles.md)).
 
 The REST API has the same hosts at `/api/v1/l4-proxy-hosts` (see `/api/v1/openapi.json`).
