@@ -1,7 +1,7 @@
 services:
   web:
     container_name: ingressi-web
-    image: ghcr.io/ingres-si/ingressi-web:latest
+    image: ${INGRESSI_IMAGE_PREFIX:-ghcr.io/ingres-si/ingressi}-web:latest
     build:
       context: .
       dockerfile: docker/web/Dockerfile
@@ -110,7 +110,7 @@ services:
 
   caddy:
     container_name: ingressi-caddy
-    image: ghcr.io/ingres-si/ingressi-caddy:latest
+    image: ${INGRESSI_IMAGE_PREFIX:-ghcr.io/ingres-si/ingressi}-caddy:latest
     build:
       context: .
       dockerfile: docker/caddy/Dockerfile
@@ -200,7 +200,7 @@ services:
   # Uses Docker socket proxy instead of direct Docker socket access.
   l4-port-manager:
     container_name: ingressi-l4-ports
-    image: ghcr.io/ingres-si/ingressi-l4-port-manager:latest
+    image: ${INGRESSI_IMAGE_PREFIX:-ghcr.io/ingres-si/ingressi}-l4-port-manager:latest
     build:
       context: .
       dockerfile: docker/l4-port-manager/Dockerfile

@@ -1,0 +1,42 @@
+upstream:
+  repository: ingres-si/ingressi
+  branch: develop
+  check_interval: daily
+
+sync:
+  strategy: merge
+  max_changed_files: 100
+  max_ai_attempts: 2
+
+protected_paths:
+  - .github/workflows/**
+  - .github/agents/**
+  - .upstream/**
+  - tests/custom/**
+  - AGENTS.md
+  - app/(dashboard)/l4-proxy-hosts/L4ProxyHostsClient.tsx
+  - app/api/l4-ports/route.ts
+  - docker-compose.host.yml
+  - documentation/l4-proxy-hosts.md
+  - src/components/l4-proxy-hosts/L4PortsApplyBanner.tsx
+  - src/lib/caddy.ts
+  - src/lib/l4-ports.ts
+  - tests/integration/l4-ports.test.ts
+
+validation:
+  typecheck: true
+  unit_and_integration_tests: true
+  production_build: true
+  docker_build: true
+  security_scan: dependency-review
+
+merge:
+  enabled: true
+  require_all_checks: true
+  require_human_review: false
+
+release:
+  enabled: true
+  strategy: upstream-patch-custom-sequence
+  github_release: true
+  docker_publish: true

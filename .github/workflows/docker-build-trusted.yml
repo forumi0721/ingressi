@@ -10,13 +10,15 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional additional GHCR image tag (for example, manual-test)"
+        required: false
+        type: string
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/ingressi
-  # Images are pushed with GHCR_PUSH_TOKEN: a classic personal access token of
-  # the maintainer with only the write:packages scope.
-  GHCR_PUSH_USER: fuomag9
 
 jobs:
   build-and-push:
@@ -53,14 +55,19 @@ jobs:
       - name: Decide which moving tags this release gets
         id: release
         run: |
-          # A patch release on an older release line (lts/2.0 after 2.3 shipped) must not
-          # move `latest`, or the major tag, back to an older version. Only the
-          # newest stable release gets `latest`, and only the newest stable
-          # release of its major version gets the major tag. The minor tag
-          # (2.0) always follows its own line.
+          # Older upstream stable tags must not move stable aliases backward.
+          # Custom downstream tags move aliases only when they are the newest
+          # custom tag overall or for their major version.
           latest=false
           latest_in_major=false
-          if [[ "${GITHUB_REF}" == refs/tags/v* && "${GITHUB_REF_NAME}" != *-* ]]; then
+          if [[ "${GITHUB_REF}" == refs/tags/v* && "${GITHUB_REF_NAME}" == *-custom.* ]]; then
+            version="${GITHUB_REF_NAME}"
+            major="${version%%.*}"
+            newest_custom="$(git tag -l 'v*-custom.*' | sort -V | tail -n 1)"
+            newest_custom_in_major="$(git tag -l "${major}.*-custom.*" | sort -V | tail -n 1)"
+            [ "$version" = "$newest_custom" ] && latest=true
+            [ "$version" = "$newest_custom_in_major" ] && latest_in_major=true
+          elif [[ "${GITHUB_REF}" == refs/tags/v* && "${GITHUB_REF_NAME}" != *-* ]]; then
             version="${GITHUB_REF_NAME}"
             major="${version%%.*}"
             newest="$(git tag -l 'v*' | grep -v -e '-' | sort -V | tail -n 1)"
@@ -74,21 +81,28 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Check the push token
+      - name: Validate optional manual image tag
+        id: manual-tag
         env:
-          GHCR_PUSH_TOKEN: ${{ secrets.GHCR_PUSH_TOKEN }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
-          if [ -z "$GHCR_PUSH_TOKEN" ]; then
-            echo "::error::Set the GHCR_PUSH_TOKEN secret: a classic personal access token of ${GHCR_PUSH_USER} with the write:packages scope."
+          set -euo pipefail
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "Invalid Docker image tag: use 1-128 letters, digits, underscores, periods, or hyphens, starting with a letter, digit, or underscore."
             exit 1
           fi
+          echo "value=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ env.GHCR_PUSH_USER }}
-          password: ${{ secrets.GHCR_PUSH_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata (tags, labels, annotations)
         id: meta
@@ -123,6 +137,7 @@ jobs:
             # stable v* tag: not on pre-release tags (e.g. v1.12.0-rc.1), and
             # not on patch releases of an older line.
             type=raw,value=latest,enable=${{ steps.release.outputs.latest == 'true' }}
+            type=raw,value=${{ steps.manual-tag.outputs.value }},enable=${{ steps.manual-tag.outputs.value != '' }}
 
       - name: Compute app version
         id: app-version

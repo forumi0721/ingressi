@@ -3,10 +3,10 @@
 # Set CADDY_HOST_GATEWAY_IP to the host address mapped by Docker's
 # host-gateway special name (commonly 172.17.0.1).
 services:
+  docker-socket-proxy: !reset null
+  l4-port-manager: !reset null
+
   web:
-    extends:
-      file: docker-compose.yml
-      service: web
     environment:
       CADDY_NETWORK_MODE: host
       CADDY_API_URL: http://host.docker.internal:2019
@@ -16,9 +16,6 @@ services:
       - "host.docker.internal:host-gateway"
 
   caddy:
-    extends:
-      file: docker-compose.yml
-      service: caddy
     network_mode: host
     ports: !reset []
     networks: !reset []
@@ -28,16 +25,6 @@ services:
     environment:
       CADDY_ADMIN_ADDRESS: ${CADDY_HOST_GATEWAY_IP:?Set CADDY_HOST_GATEWAY_IP to the Docker host-gateway address}:2019
       CADDY_ADMIN_HEALTH_URL: http://${CADDY_HOST_GATEWAY_IP:?Set CADDY_HOST_GATEWAY_IP to the Docker host-gateway address}:2019
-
-  clickhouse:
-    extends:
-      file: docker-compose.yml
-      service: clickhouse
-
-  geoipupdate:
-    extends:
-      file: docker-compose.yml
-      service: geoipupdate
 
 volumes:
   caddy-manager-data:

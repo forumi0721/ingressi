@@ -86,7 +86,7 @@ services:
 
   dashboard-lb:
     container_name: ingressi-dashboard-lb
-    image: ghcr.io/ingres-si/ingressi-caddy:latest
+    image: ${INGRESSI_IMAGE_PREFIX:-ghcr.io/ingres-si/ingressi}-caddy:latest
     restart: unless-stopped
     command: ["caddy", "run", "--config", "/etc/caddy/dashboard-lb.Caddyfile", "--adapter", "caddyfile"]
     configs:

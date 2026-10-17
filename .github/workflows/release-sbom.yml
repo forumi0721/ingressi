@@ -37,6 +37,6 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --verify-tag --title "Ingressi $TAG" --notes "Release notes follow before publishing."
+            gh release create "$TAG" --draft --verify-tag --title "Ingressi $TAG" --generate-notes
           fi
           gh release upload "$TAG" "ingressi-$TAG.cdx.json" --clobber
