@@ -43,6 +43,7 @@ vi.mock('../../src/lib/config', async (importOriginal) => ({
   config: ctx.config,
 }));
 vi.mock('../../src/lib/l4-ports', () => ({
+  getCaddyNetworkMode: () => 'bridge',
   getL4PortsDiff: async () => ({ currentPorts: [], requiredPorts: [], needsApply: false }),
   applyL4Ports: vi.fn(),
 }));
