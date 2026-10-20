@@ -51,7 +51,7 @@ jobs:
       - name: Trigger Docker image build
         if: steps.sync.outputs.merge_type != 'none' || inputs.force_build == true
         env:
-          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           echo "Triggering Build and Push Docker Images (Trusted)..."
