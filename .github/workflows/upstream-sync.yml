@@ -72,6 +72,8 @@ jobs:
           fi
           echo "changed=true" >> "$GITHUB_OUTPUT"
           git switch --create "$branch" "origin/${BASE_BRANCH}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if git merge --no-edit "$upstream_sha"; then
             echo "conflict=false" >> "$GITHUB_OUTPUT"
@@ -300,6 +302,8 @@ jobs:
           next="$(git tag --list "${prefix}*" | sed "s/^${prefix}//" | awk '/^[0-9]+$/ { if ($1 > max) max=$1 } END { print max + 1 }')"
           tag="${prefix}${next}"
           commit="$(gh pr view "$PR_NUMBER" --json mergeCommit --jq '.mergeCommit.oid')"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$tag" "$commit" -m "Ingressi ${tag}"
           git push origin "$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
