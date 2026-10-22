@@ -1,101 +1,40 @@
 name: Build and Push Docker Images (Trusted)
 
+# Only the customized `web` image is built. The caddy and l4-port-manager
+# images are taken from upstream.
+
 on:
   push:
     branches:
-      - main
       - develop
-      # Release lines, e.g. lts/2.0
-      - 'lts/**'
-    tags:
-      - 'v*'
   workflow_dispatch:
-    inputs:
-      image_tag:
-        description: "Optional additional GHCR image tag (for example, manual-test)"
-        required: false
-        type: string
+
+# A newer build supersedes any build still in progress.
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/ingressi
+  IMAGE_NAME: ${{ github.repository_owner }}/ingressi-web
 
 jobs:
   build-and-push:
+    # arm64 is disabled for now. To enable it later, build on the native runner
+    # `ubuntu-24.04-arm` (no QEMU) with `platforms: linux/arm64`, push by digest,
+    # and merge both digests into one manifest.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
-      # Keyless cosign signing proves the image came from this workflow.
-      id-token: write
-
-    strategy:
-      matrix:
-        include:
-          - service: web
-            dockerfile: docker/web/Dockerfile
-            context: .
-            description: "Ingressi dashboard and REST API: configures the Ingressi reverse proxy"
-          - service: caddy
-            dockerfile: docker/caddy/Dockerfile
-            context: .
-            description: "Ingressi reverse proxy: Caddy with Ingressi's modules"
-          - service: l4-port-manager
-            dockerfile: docker/l4-port-manager/Dockerfile
-            context: .
-            description: "Publishes the TCP and UDP ports of Ingressi's L4 proxy hosts"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-        with:
-          # Every tag, to tell whether this release is the newest one.
-          fetch-depth: 0
-
-      - name: Decide which moving tags this release gets
-        id: release
-        run: |
-          # Older upstream stable tags must not move stable aliases backward.
-          # Custom downstream tags move aliases only when they are the newest
-          # custom tag overall or for their major version.
-          latest=false
-          latest_in_major=false
-          if [[ "${GITHUB_REF}" == refs/tags/v* && "${GITHUB_REF_NAME}" == *-custom.* ]]; then
-            version="${GITHUB_REF_NAME}"
-            major="${version%%.*}"
-            newest_custom="$(git tag -l 'v*-custom.*' | sort -V | tail -n 1)"
-            newest_custom_in_major="$(git tag -l "${major}.*-custom.*" | sort -V | tail -n 1)"
-            [ "$version" = "$newest_custom" ] && latest=true
-            [ "$version" = "$newest_custom_in_major" ] && latest_in_major=true
-          elif [[ "${GITHUB_REF}" == refs/tags/v* && "${GITHUB_REF_NAME}" != *-* ]]; then
-            version="${GITHUB_REF_NAME}"
-            major="${version%%.*}"
-            newest="$(git tag -l 'v*' | grep -v -e '-' | sort -V | tail -n 1)"
-            newest_in_major="$(git tag -l "${major}.*" | grep -v -e '-' | sort -V | tail -n 1)"
-            [ "$version" = "$newest" ] && latest=true
-            [ "$version" = "$newest_in_major" ] && latest_in_major=true
-          fi
-          echo "latest=$latest" >> "$GITHUB_OUTPUT"
-          echo "latest_in_major=$latest_in_major" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
-      - name: Validate optional manual image tag
-        id: manual-tag
-        env:
-          IMAGE_TAG: ${{ inputs.image_tag }}
-        run: |
-          set -euo pipefail
-          if [ -z "$IMAGE_TAG" ]; then
-            echo "value=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "Invalid Docker image tag: use 1-128 letters, digits, underscores, periods, or hyphens, starting with a letter, digit, or underscore."
-            exit 1
-          fi
-          echo "value=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -104,83 +43,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels, annotations)
-        id: meta
-        uses: docker/metadata-action@v6
-        env:
-          # Multi-arch images: GHCR links a package to the repository through
-          # org.opencontainers.image.source on the image index, so the OCI
-          # metadata goes on the index as well as on each platform manifest.
-          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
-        with:
-          # Each image says what it is, instead of inheriting the repository
-          # description.
-          labels: |
-            org.opencontainers.image.licenses=MIT AND Elastic-2.0
-            org.opencontainers.image.description=${{ matrix.description }}
-          annotations: |
-            org.opencontainers.image.licenses=MIT AND Elastic-2.0
-            org.opencontainers.image.description=${{ matrix.description }}
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}},enable=${{ steps.release.outputs.latest_in_major == 'true' }}
-            type=match,pattern=v(.*),group=1
-            type=sha
-            # `latest` must track the newest stable release, not the default
-            # branch: the repo's default branch is `develop`, so
-            # {{is_default_branch}} fired on every dev push and moved `latest`
-            # to unreleased builds (issue #281). Tag it only on the newest
-            # stable v* tag: not on pre-release tags (e.g. v1.12.0-rc.1), and
-            # not on patch releases of an older line.
-            type=raw,value=latest,enable=${{ steps.release.outputs.latest == 'true' }}
-            type=raw,value=${{ steps.manual-tag.outputs.value }},enable=${{ steps.manual-tag.outputs.value != '' }}
-
-      - name: Compute app version
-        id: app-version
-        run: |
-          # Bake the release version (git tag without the leading v) into the
-          # image for tag builds. Non-release (branch/dev) builds use the git
-          # commit SHA so the UI shows an identifiable build reference rather
-          # than a stale package.json placeholder (e.g. 1.0.0). See
-          # next.config.mjs for the resolution order.
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Build and push Docker image
-        id: build
         uses: docker/build-push-action@v7
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          context: .
+          file: docker/web/Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          annotations: ${{ steps.meta.outputs.annotations }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:develop
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
           build-args: |
-            APP_VERSION=${{ steps.app-version.outputs.version }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-          platforms: linux/amd64,linux/arm64
-          sbom: true
-          provenance: true
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.2
-
-      - name: Sign the pushed images
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          TAGS: ${{ steps.meta.outputs.tags }}
-        run: |
-          # Sign each repository the image was pushed to, by digest, so the
-          # signature covers exactly what was built here.
-          for repository in $(echo "$TAGS" | sed 's/:[^:]*$//' | sort -u); do
-            cosign sign --yes "${repository}@${DIGEST}"
-          done
+            APP_VERSION=${{ github.sha }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+          platforms: linux/amd64
+          sbom: false
+          provenance: false

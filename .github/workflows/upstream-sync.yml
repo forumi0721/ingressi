@@ -18,42 +18,56 @@ concurrency:
 permissions:
   contents: write
   actions: write
+  issues: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # UPSTREAM_SYNC_TOKEN (PAT) is required to assign issues to Copilot.
+      GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      BRANCH: develop
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
-
-      - name: Sync upstream branch and tags
+      - name: Sync from upstream
         id: sync
-        env:
-          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
-          UPSTREAM_REPO: ingres-si/ingressi
-          BRANCH: develop
+        run: |
+          set -uo pipefail
+          # merge-upstream follows the fork's parent repository.
+          if response=$(gh api --method POST "repos/${GH_REPO}/merge-upstream" -f branch="$BRANCH" 2>&1); then
+            echo "$response"
+            echo "merge_type=$(echo "$response" | jq -r '.merge_type // "none"')" >> "$GITHUB_OUTPUT"
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          elif echo "$response" | grep -qi "conflict"; then
+            echo "$response"
+            echo "merge_type=none" >> "$GITHUB_OUTPUT"
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$response"
+            exit 1
+          fi
+
+      - name: Ask Copilot to resolve merge conflict
+        if: steps.sync.outputs.conflict == 'true'
         run: |
           set -euo pipefail
-          echo "Syncing with upstream repository via GitHub API..."
-          response=$(gh api --method POST repos/${{ github.repository }}/merge-upstream -f branch="$BRANCH")
-          echo "$response"
-          merge_type=$(echo "$response" | jq -r '.merge_type // "none"')
-          echo "merge_type=${merge_type}" >> "$GITHUB_OUTPUT"
+          title="Resolve upstream merge conflict"
+          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Issue #$existing already open; skipping."
+            exit 0
+          fi
+          upstream=$(gh api "repos/${GH_REPO}" --jq '.parent.full_name')
+          body="Merging \`${upstream}@${BRANCH}\` into \`${BRANCH}\` conflicts.
 
-          # Sync upstream tags
-          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" || true
-          git fetch upstream --tags
-          git push origin --tags || true
+          Merge upstream \`${BRANCH}\` into this repository's \`${BRANCH}\` and resolve all conflicts.
+          Follow \`.github/agents/upstream-maintainer.agent.md\` and keep the features listed in \`.upstream/protected-features.md\`.
+          Keep changes minimal. Do not touch \`.github/workflows/**\`. Open a PR targeting \`${BRANCH}\`."
+          gh issue create --title "$title" --body "$body" --assignee "@copilot"
 
       - name: Trigger Docker image build
         if: steps.sync.outputs.merge_type != 'none' || inputs.force_build == true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          echo "Triggering Build and Push Docker Images (Trusted)..."
-          gh workflow run docker-build-trusted.yml --repo "${{ github.repository }}" --ref develop
-          echo "Successfully triggered Build and Push Docker Images (Trusted)."
+        run: gh workflow run docker-build-trusted.yml --ref "$BRANCH"
