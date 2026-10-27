@@ -52,6 +52,7 @@ import {
   type RateLimitSettings
 } from "./settings";
 import { buildDefaultResponseRoute } from "./caddy-default-response";
+import { buildProxyProtocolListenerWrappers } from "./proxy-protocol";
 import { isReservedL4Port } from "./l4-reserved-ports";
 import { buildDnsChallengeConfig, type DnsProviderCredentials } from "./dns-providers";
 import { parseStoredCertificateProviderOptions } from "./certificate-provider-options";
@@ -1027,7 +1028,7 @@ export function normalizeTrustedProxyRanges(ranges: string[] | undefined | null)
 
 /**
  * Build the server-level trusted-proxy fields for the main HTTP server object
- * (`servers.ingressi`). Caddy resolves `{http.request.client_ip}` in core — before
+ * (`servers.ingressi`). Caddy resolves `{http.vars.client_ip}` in core — before
  * any handler runs — so this is the only place a global trusted-proxy list can
  * fix client-IP attribution for access logs, analytics and downstream handlers.
  *
@@ -3446,6 +3447,9 @@ async function buildCaddyDocumentFromDatabase() {
   // in core before any handler, so this is the only place a global list fixes
   // client-IP attribution for access logs, analytics and downstream handlers.
   const serverTrustedProxies = buildServerTrustedProxies(trustedProxiesSettings);
+  // PROXY protocol from the listed load balancers: the header's address
+  // becomes the connection's, before trusted proxies and any handler.
+  const serverListenerWrappers = buildProxyProtocolListenerWrappers(trustedProxiesSettings?.proxy_protocol_ranges);
 
   // Main HTTP/HTTPS server for proxy hosts
   if (mainRoutes.length > 0) {
@@ -3462,6 +3466,7 @@ async function buildCaddyDocumentFromDatabase() {
       ...(errorRoutes.length > 0 ? { errors: { routes: errorRoutes } } : {}),
       // Trusted proxies / client_ip_headers / trusted_proxies_strict (issue #222)
       ...serverTrustedProxies,
+      ...serverListenerWrappers,
       // Enable access logging if configured
       ...(loggingEnabled ? { logs: { default_logger_name: "http_access" } } : {})
     };
