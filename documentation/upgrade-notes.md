@@ -2,6 +2,19 @@
 
 Pull the new images and recreate the containers with `docker compose pull && docker compose up -d`. (`docker compose restart` does not re-read `.env`.)
 
+## Upgrading to v2.9.0
+
+- **PROXY protocol on ports 80 and 443.** **Host defaults → Trusted proxies → PROXY protocol from** lists the TCP load balancers in front of Caddy (HAProxy in TCP mode, a cloud network load balancer, OPNsense, another Caddy with layer4) that open each connection with a PROXY protocol header, v1 or v2. Access logs, access lists, geo blocking, rate limits, the WAF, analytics and the addresses that skip sign-in then see the visitor, not the balancer. Only the listed addresses may send the header, and from them it is optional. REST: `proxy_protocol_ranges` in `/api/v1/settings/trusted-proxies`. See [settings.md](settings.md).
+- **Rate limits count each client separately.** A host's rate limit keyed on the client address used a placeholder Caddy does not have, so it was empty and every client shared one allowance. The limit now applies to each client address. A limit you raised to cope with the shared allowance can be lowered again.
+- **Response headers for every response.** The **Response headers** card under **Host defaults** sets or removes headers on every response of the main server: every host, requests for unknown hosts and error responses. Removing `Server` and `Via` hides Caddy's own headers and an upstream's `Server` header. Framing headers and values that copy a request header or cookie are refused. REST: `/api/v1/settings/response-headers`; it syncs to replicas and is kept in the configuration history.
+- **Geo blocking follows the rules its page shows.** Check hosts with their own geo rules:
+  - A turned-off global geo config no longer applies to hosts with rules of their own in merge mode. They used to block by the saved global rules.
+  - **Use these ranges for geo blocking too** now reaches every host's geo rules, not only the global config. A host with its own rules used to judge requests by the proxy's address.
+  - The host editor warns that allow rules alone block nothing, and the protection coverage report counts such a host as not geo blocked, as the Geo pill does.
+- **The sign-in portal takes a username or an email address.** Users created with a real email address could not sign in at the portal, whatever they typed. It now accepts the sign-in username, the email address or the portal name (`<name>@localhost`, as the primary admin has), in any case. The dashboard login page still takes the sign-in username only. See [forward-auth.md](forward-auth.md#signing-in-at-the-portal).
+- **Dependency updates.** better-auth 1.7.12 and its passkey plugin 1.7.13, the Anthropic SDK 1.1, maplibre-gl 6.15, nodemailer 10.2, swagger-ui-react 5.34, lucide-react and postcss, the Caddy image's base images and the ionos DNS module. The SQLite layer also runs on Bun 1.4.
+- No database migration.
+
 ## Upgrading to v2.8.2
 
 - **Dependency updates.** Next.js 16.4.2, better-auth 1.7.10, maplibre-gl 6.14, nodemailer 10.1, the Radix UI packages, zod, React 19.3.1 and the Anthropic SDK, among others, and a refreshed set of Caddy compatibility pins. The API reference (Swagger UI) uses ApiDOM 1.12.1.
