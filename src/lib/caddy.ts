@@ -972,8 +972,9 @@ export function resolveEffectiveGeoBlock(
   }
 
   // Host merge mode: only enabled host config should alter global behavior.
-  // A disabled host geoblock means "no per-host geoblock" in merge mode.
-  if (hostConfig?.enabled && globalConfig) {
+  // A disabled host geoblock means "no per-host geoblock" in merge mode, and
+  // a disabled global one keeps its saved rules out of the host's.
+  if (hostConfig?.enabled && globalConfig?.enabled) {
     return mergeGeoBlockSettings(globalConfig, hostConfig);
   }
 
@@ -982,6 +983,20 @@ export function resolveEffectiveGeoBlock(
   if (globalConfig?.enabled) return globalConfig;
 
   return null;
+}
+
+/**
+ * The geo blocking config with the server's trusted proxy ranges as its
+ * trusted proxies when it lists none of its own ("Use these ranges for geo
+ * blocking too", issue #222). The blocker reads X-Forwarded-For only from
+ * the proxies it is given, not from the server's list.
+ */
+export function withDefaultGeoBlockTrustedProxies(
+  config: GeoBlockSettings | null,
+  ranges: readonly string[] | undefined
+): GeoBlockSettings | null {
+  if (!config || !ranges?.length || config.trusted_proxies?.length) return config;
+  return { ...config, trusted_proxies: [...ranges] };
 }
 
 export function buildBlockerHandler(config: GeoBlockSettings): Record<string, unknown> {
@@ -1197,6 +1212,12 @@ type BuildProxyRoutesOptions = {
    * without, the address of the connection (as access list rules do).
    */
   trustedProxies?: readonly string[];
+  /**
+   * The trusted proxies of a host's geo blocking when its effective rules
+   * list none: the server's ranges when they are to be used for geo
+   * blocking too, else none.
+   */
+  geoBlockTrustedProxies?: readonly string[];
 };
 
 export function buildLocationReverseProxy(
@@ -1359,9 +1380,12 @@ async function buildProxyRoutes(
     const ingressiForwardAuth = meta.cpm_forward_auth?.enabled ? meta.cpm_forward_auth : null;
     const hostRoutes: CaddyHttpRoute[] = [];
 
-    const effectiveGeoBlock = resolveEffectiveGeoBlock(
-      options.globalGeoBlock ?? null,
-      { geoblock: meta.geoblock ?? null, geoblock_mode: meta.geoblock_mode ?? "merge" }
+    const effectiveGeoBlock = withDefaultGeoBlockTrustedProxies(
+      resolveEffectiveGeoBlock(
+        options.globalGeoBlock ?? null,
+        { geoblock: meta.geoblock ?? null, geoblock_mode: meta.geoblock_mode ?? "merge" }
+      ),
+      options.geoBlockTrustedProxies
     );
     if (effectiveGeoBlock?.enabled) {
       handlers.unshift(buildBlockerHandler(effectiveGeoBlock));
@@ -3350,16 +3374,15 @@ async function buildCaddyDocumentFromDatabase() {
     getRateLimitSettings()
   ]);
 
-  // Optionally seed the global geoblock trusted-proxy list from the server-level
-  // value so the two can't silently disagree (issue #222). Only applied as a
-  // default: an explicit per-scope geoblock list is left untouched.
-  let effectiveGlobalGeoBlock = globalGeoBlock;
-  if (trustedProxiesSettings?.default_geoblock && globalGeoBlock) {
-    const serverRanges = (trustedProxiesSettings.ranges ?? []).map((r) => r.trim()).filter(Boolean);
-    if (serverRanges.length > 0 && !(globalGeoBlock.trusted_proxies?.length)) {
-      effectiveGlobalGeoBlock = { ...globalGeoBlock, trusted_proxies: serverRanges };
-    }
-  }
+  // Optionally seed the geoblock trusted-proxy lists from the server-level
+  // value so the two can't silently disagree (issue #222): the global list
+  // here, and each host's effective list in buildProxyRoutes, so hosts with
+  // their own or overriding rules get it too. Only applied as a default: an
+  // explicit geoblock list is left untouched.
+  const geoBlockTrustedProxies = trustedProxiesSettings?.default_geoblock
+    ? (trustedProxiesSettings.ranges ?? []).map((r) => r.trim()).filter(Boolean)
+    : [];
+  const effectiveGlobalGeoBlock = withDefaultGeoBlockTrustedProxies(globalGeoBlock, geoBlockTrustedProxies);
   const { tlsApp, managedCertificateIds } = await buildTlsAutomation(certificateUsage, autoManagedDomains, {
     acmeEmail: generalSettings?.acmeEmail,
     dnsSettings,
@@ -3399,6 +3422,7 @@ async function buildCaddyDocumentFromDatabase() {
       wafExclusions: await listWafExclusionRows(),
       accessListInvokes: accessListConfig.invokes,
       trustedProxies: normalizeTrustedProxyRanges(trustedProxiesSettings?.ranges),
+      geoBlockTrustedProxies,
     }
   );
 

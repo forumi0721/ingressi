@@ -299,7 +299,9 @@ describe('AI first drafts', () => {
 
 describe('REST API', () => {
   it('creates, lists, reads and deletes drafts', async () => {
-    const created = await incidentsRoute.POST(req('POST', '/api/v1/compliance/incidents', { title: 'Outage', detectedAt: DETECTED }));
+    // The route runs on the real clock, and an incident's period (from a day before detection to now) is limited to 31 days.
+    const detectedAt = new Date(Date.now() - 2 * 3600_000).toISOString();
+    const created = await incidentsRoute.POST(req('POST', '/api/v1/compliance/incidents', { title: 'Outage', detectedAt }));
     expect(created.status).toBe(201);
     const incident: IncidentView = await created.json();
     expect(created.headers.get('location')).toBe(`/api/v1/compliance/incidents/${incident.id}`);

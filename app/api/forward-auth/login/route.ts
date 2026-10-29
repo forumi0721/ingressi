@@ -14,6 +14,7 @@ import { logAuditEvent } from "@/src/lib/audit";
 import { getClientIp } from "@/src/lib/client-ip";
 import { getUserPasswordHash } from "@/src/lib/models/user";
 import { beginPortalLoginAttempt } from "@/src/lib/forward-auth-login-limiter";
+import { findPortalAccount } from "@/src/lib/sign-in-names";
 
 // Compared against when the account does not exist, is inactive or has no
 // password, so those cases take as long to reject as a wrong password. A cost-12
@@ -46,15 +47,13 @@ async function readBodyText(request: NextRequest): Promise<string | null> {
 }
 
 /**
- * Looks up the account and checks the password, using the same logic as the
- * credentials provider. Runs exactly one bcrypt compare whether or not the
- * account can sign in, so every rejection takes about as long.
+ * Looks up the account (by sign-in username, email address or portal name, see
+ * findPortalAccount) and checks the password. Runs exactly one bcrypt compare
+ * whether or not the account can sign in, so every rejection takes about as
+ * long.
  */
 async function checkCredentials(username: string, password: string) {
-  const email = `${username}@localhost`;
-  const user = await appDb.query.users.findFirst({
-    where: (table, operators) => operators.eq(table.email, email)
-  });
+  const user = await findPortalAccount(appDb, username);
   const usable = user && user.status === "active";
   const passwordHash = usable ? await getUserPasswordHash(user) : null;
   const isValid = await bcrypt.compare(password, passwordHash ?? DUMMY_PASSWORD_HASH);

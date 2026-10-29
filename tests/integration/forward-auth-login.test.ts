@@ -25,6 +25,7 @@ vi.mock('../../src/lib/audit', () => ({ logAuditEvent: vi.fn() }));
 
 import * as schema from '../../src/lib/db/schema';
 import { createRedirectIntent } from '../../src/lib/models/forward-auth';
+import { logAuditEvent } from '../../src/lib/audit';
 import { POST as forwardAuthLogin } from '../../app/api/forward-auth/login/route';
 import { config } from '../../src/lib/config';
 import { ACCOUNT_FAILURE_CEILING } from '../../src/lib/forward-auth-login-limiter';
@@ -317,5 +318,88 @@ describe('forward-auth login', () => {
     expect(blocked.status).toBe(429);
     const other = await login('judy', PASSWORD, { 'x-real-ip': '198.51.100.77', 'x-forwarded-for': clientIp });
     expect(other.status).toBe(200);
+  });
+});
+
+describe('forward-auth login: which name reaches an account', () => {
+  // A different client for every attempt, so the failures here never meet the limiters.
+  let attempt = 0;
+  const loginAs = (name: string, password = PASSWORD) =>
+    login(name, password, { 'x-forwarded-for': `198.51.100.${testIpCounter}${attempt++ % 10}` });
+
+  it('signs in by the username, the email address or the portal name, in any case', async () => {
+    await insertUser('jan', { email: 'jan@example.com', username: 'jan.k', displayUsername: 'jan.k' });
+    await insertUser('ops', { email: 'ops@localhost', username: 'ops-admin' });
+
+    for (const name of ['jan.k', 'JAN.K', 'jan@example.com', 'Jan@Example.com', 'ops-admin', 'ops@localhost', 'ops', 'OPS']) {
+      const res = await loginAs(name);
+      expect(res.status, name).toBe(200);
+      expect((await res.json()).redirectTo, name).toMatch(/\/\.ingressi-auth\/callback\?code=/);
+    }
+  });
+
+  it('signs in an account with no username by its email address', async () => {
+    await insertUser('pat', { email: 'pat+tag@example.com', username: null });
+    expect((await loginAs('pat+tag@example.com')).status).toBe(200);
+    expect((await loginAs('pat')).status).toBe(401);
+  });
+
+  it('does not take a name for an account it only partly matches', async () => {
+    await insertUser('jan', { email: 'jan@example.com', username: 'jan.k' });
+    for (const name of ['jan', 'jan@example.com@localhost', 'jan.k@localhost', 'example.com', 'jan@']) {
+      expect((await loginAs(name)).status, name).toBe(401);
+    }
+  });
+
+  it('keeps a disabled account out by every name', async () => {
+    await insertUser('jan', { email: 'jan@example.com', username: 'jan.k', status: 'disabled' });
+    for (const name of ['jan.k', 'jan@example.com']) {
+      expect((await loginAs(name)).status, name).toBe(401);
+    }
+  });
+
+  it('still checks the password when the name is the email address', async () => {
+    await insertUser('jan', { email: 'jan@example.com', username: 'jan.k' });
+    expect((await loginAs('jan@example.com', 'nope')).status).toBe(401);
+  });
+
+  it('gives the account with the username the name, as the login page does', async () => {
+    // Data that predates the uniqueness rules: one account is called "ops", another has the portal address ops@localhost.
+    const named = await insertUser('named', {
+      email: 'named@example.com', username: 'ops', passwordHash: bcrypt.hashSync('named-password', 4),
+    });
+    await insertUser('legacy', { email: 'ops@localhost' });
+
+    expect((await loginAs('ops', 'named-password')).status).toBe(200);
+    expect(logAuditEvent).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'forward_auth_login', userId: named.id }));
+    expect((await loginAs('ops', PASSWORD)).status).toBe(401);
+  });
+
+  it('refuses a name that reaches several accounts and has no username owner', async () => {
+    await insertUser('first', { email: 'twin@example.com' });
+    await insertUser('second', { email: 'Twin@Example.com' });
+    const compare = vi.spyOn(bcrypt, 'compare');
+
+    const res = await loginAs('twin@example.com');
+
+    expect(res.status).toBe(401);
+    expect(compare).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a character that lowercases into ASCII reach another account', async () => {
+    await insertUser('kevin', { email: 'kevin@example.com', username: 'kevin' });
+    // U+212A KELVIN SIGN lowercases to "k".
+    expect((await loginAs('\u212Aevin')).status).toBe(401);
+    expect((await loginAs('\u212Aevin@example.com')).status).toBe(401);
+  });
+
+  it('answers 403 for an account found by email that has no access to the application', async () => {
+    const user = await insertUser('jan', { email: 'jan@example.com', username: 'jan.k' });
+    await ctx.db.delete(schema.forwardAuthAccess);
+
+    const res = await loginAs('jan@example.com');
+
+    expect(res.status).toBe(403);
+    expect(logAuditEvent).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'forward_auth_access_denied', userId: user.id }));
   });
 });
