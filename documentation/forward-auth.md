@@ -9,6 +9,10 @@ Ingressi can put a sign-in page in front of a proxy host: visitors sign in with 
 3. After login, Ingressi issues a session cookie and redirects back to the protected app.
 4. Caddy's `forward_auth` directive validates every subsequent request against Ingressi.
 
+## Signing in at the portal
+
+The username field takes the account's sign-in username, its email address, or its portal name (the part before `@localhost` for an account whose email address is `<name>@localhost`, such as the primary admin), in any case. The dashboard login page takes the sign-in username only. An account without a sign-in username can still use the portal with its email address.
+
 ## Groups
 
 Create groups on the **Groups** page to organise users ([users-and-groups.md](users-and-groups.md#groups)). When you grant a group access to a proxy host, all current and future members of that group gain access automatically.
