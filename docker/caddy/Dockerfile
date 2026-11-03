@@ -4,7 +4,7 @@
 # cross-compile Caddy for the target arch via GOOS/GOARCH. This avoids QEMU
 # emulation when producing the linux/arm64 image on an x86 GitHub runner —
 # native cross-compilation is several times faster.
-FROM --platform=$BUILDPLATFORM golang:1.27@sha256:f20d83a83e18dbd2a4714b8ffd4b30b287b6243962dd75608e86abcc63ba4efc AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -20,7 +20,7 @@ RUN XCADDY_VERSION="$(go list -m -f '{{.Version}}' github.com/caddyserver/xcaddy
     go install github.com/caddyserver/xcaddy/cmd/xcaddy@"${XCADDY_VERSION}"
 RUN sh ./build.sh
 
-FROM ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944
+FROM ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
 
 # Accept build args for user/group IDs to support rootless operation
 # Using 10000 as default to avoid conflicts with system users
