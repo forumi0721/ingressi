@@ -4,12 +4,6 @@ on:
   schedule:
     - cron: "0 */6 * * *"
   workflow_dispatch:
-    inputs:
-      force_build:
-        description: "Force Docker image build even if already up to date"
-        required: false
-        type: boolean
-        default: false
 
 concurrency:
   group: upstream-sync
@@ -65,9 +59,3 @@ jobs:
           Follow \`.github/agents/upstream-maintainer.agent.md\` and keep the features listed in \`.upstream/protected-features.md\`.
           Keep changes minimal. Do not touch \`.github/workflows/**\`. Open a PR targeting \`${BRANCH}\`."
           gh issue create --title "$title" --body "$body" --assignee "@copilot"
-
-      - name: Trigger Docker image build
-        if: steps.sync.outputs.merge_type != 'none' || inputs.force_build == true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run docker-build-trusted.yml --ref "$BRANCH"
