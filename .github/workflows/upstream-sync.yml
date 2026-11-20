@@ -16,46 +16,73 @@ permissions:
 
 jobs:
   sync:
+    if: github.repository == 'forumi0721/ingressi' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # UPSTREAM_SYNC_TOKEN (PAT) is required to assign issues to Copilot.
-      GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
       BRANCH: develop
     steps:
-      - name: Sync from upstream
+      - name: Checkout downstream
+        uses: actions/checkout@v7
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Test sync behavior
+        run: bash tests/custom/upstream-sync.sh
+
+      - name: Merge upstream and push
         id: sync
         run: |
-          set -uo pipefail
-          # merge-upstream follows the fork's parent repository.
-          if response=$(gh api --method POST "repos/${GH_REPO}/merge-upstream" -f branch="$BRANCH" 2>&1); then
-            echo "$response"
-            echo "merge_type=$(echo "$response" | jq -r '.merge_type // "none"')" >> "$GITHUB_OUTPUT"
-            echo "conflict=false" >> "$GITHUB_OUTPUT"
-          elif echo "$response" | grep -qi "conflict"; then
-            echo "$response"
-            echo "merge_type=none" >> "$GITHUB_OUTPUT"
-            echo "conflict=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "$response"
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          upstream=$(gh api "repos/${GH_REPO}" --jq '.parent.full_name // empty')
+          if [ "$upstream" != "ingres-si/ingressi" ]; then
+            echo "::error::Unexpected fork parent: $upstream"
             exit 1
           fi
+          git fetch --no-tags "https://github.com/${upstream}.git" "$BRANCH"
+          upstream_sha=$(git rev-parse FETCH_HEAD)
+          bash .upstream/merge.sh "$upstream_sha"
+          if git rev-parse --verify -q MERGE_HEAD >/dev/null; then
+            git -c core.hooksPath=/dev/null commit -m "Merge ${upstream}@${BRANCH} into ${BRANCH}"
+            # Ordinary push rejects concurrent updates; never overwrite them.
+            git push origin "HEAD:refs/heads/${BRANCH}"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Synchronized with ${upstream}@${upstream_sha}." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Ask Copilot to resolve merge conflict
-        if: steps.sync.outputs.conflict == 'true'
+      - name: Build synchronized image
+        if: steps.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        # GITHUB_TOKEN pushes do not trigger push workflows; dispatch explicitly.
+        run: gh workflow run docker-build-trusted.yml --ref "$BRANCH"
+
+      - name: Close resolved sync issue
+        env:
+          ISSUE_TITLE: Resolve upstream merge conflict
         run: |
           set -euo pipefail
-          title="Resolve upstream merge conflict"
-          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
-            echo "Issue #$existing already open; skipping."
-            exit 0
-          fi
-          upstream=$(gh api "repos/${GH_REPO}" --jq '.parent.full_name')
-          body="Merging \`${upstream}@${BRANCH}\` into \`${BRANCH}\` conflicts.
+          gh issue list --state open --search '"Resolve upstream merge conflict" in:title' --json number,title \
+            --jq '.[] | select(.title == env.ISSUE_TITLE) | .number' |
+          while read -r number; do
+            gh issue close "$number" --reason completed
+          done
 
-          Merge upstream \`${BRANCH}\` into this repository's \`${BRANCH}\` and resolve all conflicts.
-          Follow \`.github/agents/upstream-maintainer.agent.md\` and keep the features listed in \`.upstream/protected-features.md\`.
-          Keep changes minimal. Do not touch \`.github/workflows/**\`. Open a PR targeting \`${BRANCH}\`."
-          gh issue create --title "$title" --body "$body" --assignee "@copilot"
+      - name: Report blocked sync
+        if: failure()
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ISSUE_TITLE: Resolve upstream merge conflict
+        run: |
+          set -euo pipefail
+          echo "::error::Upstream sync failed. See $RUN_URL"
+          echo "Upstream sync failed: $RUN_URL" >> "$GITHUB_STEP_SUMMARY"
+          existing=$(gh issue list --state open --search '"Resolve upstream merge conflict" in:title' --json number,title \
+            --jq '[.[] | select(.title == env.ISSUE_TITLE)][0].number // empty')
+          if [ -z "$existing" ]; then
+            gh issue create --title "$ISSUE_TITLE" --body "Upstream sync failed: $RUN_URL. Inspect the failed step, resolve any code conflicts while preserving .upstream/protected-features.md, and rerun Upstream sync. No Copilot credits are required by this workflow."
+          fi
+          # This notification never converts a failed sync into a successful run.

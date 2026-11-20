@@ -1,61 +1,48 @@
 # Downstream upstream maintenance
 
-This repository tracks `ingres-si/ingressi`'s `develop` branch. The daily
-Upstream sync workflow compares it with this repository's default branch,
-creates a sync branch, applies a merge, and opens a pull request. Merge
-conflicts are offered to Copilot CLI on an isolated job. Copilot cannot publish
-branches or releases; a separate job checks policy, types, tests, the
-production build, and all three Docker images before requesting auto-merge.
+This fork tracks `ingres-si/ingressi`'s `develop` branch. **Upstream sync**
+runs every six hours (GitHub may delay scheduled runs) and supports manual
+execution from Actions. It uses only the built-in `GITHUB_TOKEN`; no PAT,
+Copilot subscription, or AI credits are required.
 
-## Required repository secrets
+## Merge behavior
 
-Add these under **Settings → Secrets and variables → Actions**:
+The workflow fetches upstream and prepares a normal merge with
+`.upstream/merge.sh`. The fork owns `.github/workflows/**`: its existing
+workflows and intentional deletions are preserved, and new upstream workflows
+are not enabled automatically. Review upstream CI changes separately when
+updating this fork's build or test configuration.
 
-- `UPSTREAM_SYNC_TOKEN`: a fine-grained token with this repository's Contents
-  read/write, Pull requests read/write, Issues read/write, and Actions read
-  permissions. It is used to create PRs and release tags. Using this token
-  ensures the normal PR and tag workflows run; workflow-generated
-  `GITHUB_TOKEN` pushes do not start other workflows.
-- `COPILOT_GITHUB_TOKEN`: a fine-grained personal access token owned by the
-  user account, with the `Copilot Requests` permission (`write`). In the
-  token UI, choose `Public repositories` so this permission is available for
-  this public repository. Required only when a merge conflict needs AI
-  resolution. Copilot CLI use and billing must be enabled for the account.
+Changes elsewhere merge normally. Code conflicts abort the merge and fail
+the workflow. The workflow keeps a single open **Resolve upstream merge
+conflict** issue for investigation; an existing issue never suppresses failure
+or skips a subsequent sync attempt. There is no automatic AI conflict resolver.
+Preserve the Host Network Mode behavior in `.upstream/protected-features.md`
+when resolving conflicts manually. The broader review policy in
+`.upstream/policy.yml` and its checker remain tools for manual review; this
+workflow does not claim to run the full release validation pipeline.
 
-Trusted GHCR image builds use the workflow's built-in `GITHUB_TOKEN` with the
-job-scoped `packages: write` permission; no GHCR PAT or other repository
-variables are required. Ensure the GHCR packages are associated with this
-repository or grant this repository Actions access to them.
+Successful merges are pushed without force. Concurrent branch updates reject
+the push and leave a failed run for investigation; rerun to use the latest
+branch. A scheduled no-op run creates no commit and starts no image build. A manual
+run also requests a build, so it can retry a failed build dispatch.
 
-Keep the sync and Copilot credentials separate: the sync token can write
-repository content and create pull requests, while the Copilot token should
-only authorize Copilot requests. This setup uses a Copilot Requests token
-because the target is a personal repository; organization billing would need
-an organization-policy change and a corresponding workflow permission change.
+After a changed sync, the workflow explicitly dispatches
+`docker-build-trusted.yml`, because pushes using `GITHUB_TOKEN` do not start
+push workflows. The image build has its own status; sync success means the
+merge was pushed and its build was requested, not that image publishing
+completed. Existing sync issues close only after all preceding steps succeed.
+No releases or tags are created.
 
-## Before enabling unattended sync
+## Repository setup and verification
 
-1. Ensure GitHub Actions is enabled and that the token owner can push to the
-   repository and create releases.
-2. Configure branch protection for the default branch. Require the existing
-   `Tests`, `E2E`, `Build Docker Images (PR)`, and `Dependency Review` checks
-   if those checks are part of the release policy, and allow auto-merge. The
-   controller also runs deterministic validation before calling the merge API.
-3. Review `.upstream/policy.yml` and `.upstream/protected-features.md`. Changes
-   to workflow, policy, agent instructions, or the listed Host Mode feature
-   files stop for review. Changes over 100 files also stop.
-4. Run **Actions → Upstream sync → Run workflow** manually before relying on
-   the daily schedule.
+- Enable Actions and allow this workflow to write Contents, Actions, and Issues.
+- Branch rules must permit the Actions bot to push to `develop`; if reviews
+  are mandatory, use a reviewed merge instead of bypassing those rules.
+- Run `bash tests/custom/upstream-sync.sh` to verify merge behavior locally.
+- Run **Actions → Upstream sync → Run workflow** on `develop` after deployment.
+  Check the sync summary, upstream commit ancestry, and the separate Docker
+  build result. A red run requires investigation even when an issue exists.
 
-Validated upstream merges receive tags in the form
-`v<upstream-version>-custom.<sequence>`. The tag triggers the existing
-multi-architecture build, signs images, uploads SBOM/provenance, and creates a
-GitHub release only after image publishing succeeds. Custom releases also
-update the moving `latest` image tag. Set `INGRESSI_IMAGE_PREFIX` in `.env` to
-`ghcr.io/<your-owner>/ingressi` to deploy those images; the default remains the
-upstream image prefix.
-
-AI is used only to propose conflict resolutions. It cannot modify protected
-automation or tests, and its output is not treated as evidence that checks
-passed. This automation still executes upstream source in CI; Actions and
-Copilot permissions should be limited to the intended repository.
+Trusted GHCR builds use the build job's `packages: write` permission. No
+additional GHCR token is required; grant this repository access to its package.
